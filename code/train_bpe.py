@@ -1,8 +1,5 @@
-from numpy import byte
 import regex
-import multiprocessing
 from cs336_basics.pretokenization_example import find_chunk_boundaries
-import time
 
 # Example Usage
 
@@ -20,6 +17,7 @@ class BPE:
         self.encoder = {v: k for k, v in self.decoder.items()}
 
         self.tokens = []
+        self.merges: list[tuple[bytes, bytes]] = []
 
     def pretokenize(self):
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -78,28 +76,31 @@ class BPE:
         
         # End of this run
 
+        self.merges.append(tuple([self.decoder[i] for i in most_freq_pair[0]]))
         return most_freq_pair[0]
 
         # Now the algorithm is so dumb that it will came across all the tokens and construct a new freq table every time.
         # This is not efficient, should be revised later!
-        
 
 
-
-    def train(self, text):
+    def train(self):
         pretoken = self.pretokenize()
         self.tokens = self.encode_from_bytes(pretoken)
-        self.merge()
+        for i in range(self.vocab_size-256):
+            self.merge()
+        
+        return self.encoder, self.decoder
 
     def report(self):
 
-        vocab: dict[int, bytes]
-        merges: list[tuple[bytes, bytes]]
+        vocab: dict[int, bytes] = self.decoder
+        merges: list[tuple[bytes, bytes]] = self.merges
 
         return vocab, merges
 
-        raise NotImplementedError
 
 if __name__ == "__main__":
-    instance = BPE(10000, "tests/fixtures/tinystories_sample_5M.txt", '<|endoftext|>', 4)
-    instance.pretokenize()
+    instance = BPE(1000, "tests/fixtures/tinystories_sample_5M.txt", '<|endoftext|>', 4)
+    instance.train()
+    result = instance.report()
+    print(result)
