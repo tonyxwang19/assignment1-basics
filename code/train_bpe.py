@@ -41,8 +41,17 @@ class BPE:
         # Note: this is an early implementation using only one single thread, which is extremely slow in production environment. 
         # CHANGE IT!
 
-    def encode_from_bytes(self, pretokens: list[list[bytes]]) -> list[list[int]]:
-        return [[self.encoder[b] for b in token] for token in pretokens]
+    def encode_from_bytes(self, pretokens: list[bytes]) -> list[list[int]]:
+        tokens: list[list[int]] = []
+        for i in range(len(pretokens)):
+            pretoken = pretokens[i]
+            tokens.append([])
+            if pretoken == self.special_token.encode('utf-8'):
+                continue
+            else:
+                for b in pretoken:
+                    tokens[i].append(self.encoder[bytes([b])])
+        return tokens
 
     def merge(self):
         self.frequency_table: dict[tuple[int, int], list[tuple[int, int]]] = {}
@@ -67,8 +76,8 @@ class BPE:
         )
 
         #Updating encoder and decoder
-        self.decoder[len(self.decoder)] = bytes([self.encoder[most_freq_pair[0][0]], self.encoder[most_freq_pair[0][1]]])
-        self.encoder[bytes([self.encoder[most_freq_pair[0][0]], self.encoder[most_freq_pair[0][1]]])] = len(self.decoder) - 1
+        self.decoder[len(self.decoder)] = self.decoder[most_freq_pair[0][0]] + self.decoder[most_freq_pair[0][1]]
+        self.encoder[self.decoder[most_freq_pair[0][0]] + self.decoder[most_freq_pair[0][1]]] = len(self.decoder) - 1
 
         for (index, pos) in reversed(most_freq_pair[1]):
             tokens = self.tokens[index]
@@ -86,7 +95,7 @@ class BPE:
     def train(self):
         pretoken = self.pretokenize()
         self.tokens = self.encode_from_bytes(pretoken)
-        for i in range(self.vocab_size-256):
+        for i in range(self.vocab_size - len(self.decoder)):
             self.merge()
         
         return self.encoder, self.decoder
