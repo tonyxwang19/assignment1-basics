@@ -1,3 +1,4 @@
+from numpy import byte
 import regex
 import multiprocessing
 from cs336_basics.pretokenization_example import find_chunk_boundaries
@@ -6,32 +7,89 @@ import time
 # Example Usage
 
 class BPE:
-    def __init__(self, vocab_size: int, input_path: str, special_tokens: list[str], num_processes: int = 4):
+    def __init__(self, vocab_size: int, input_path: str, special_tokens: str, num_processes: int = 4):
         self.vocab_size = vocab_size
-        self.special_tokens = special_tokens
+        self.special_token = special_tokens
         self.path = input_path
         self.num_processes = num_processes
-        self.vocabulary: dict[int, bytes] = {}
+        self.decoder: dict[int, bytes] = {}
 
+        for i in range(256):
+            self.decoder[len(self.decoder)] = bytes([i])
+        self.decoder[len(self.decoder)] = self.special_token.encode('utf-8')
+        self.encoder = {v: k for k, v in self.decoder.items()}
+
+        self.tokens = []
 
     def pretokenize(self):
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         
         with open(self.path, "rb") as f:
-            boundaries = find_chunk_boundaries(f, self.num_processes, b"<|endoftext|>")
+            boundaries = find_chunk_boundaries(f, self.num_processes, self.special_token.encode('utf-8'))
+            tokens = []
+
             for start, end in zip(boundaries[:-1], boundaries[1:]):
                 f.seek(start)
                 chunk = f.read(end - start).decode("utf-8", errors="ignore")
-                for m in regex.finditer(PAT, chunk):
-                    tokens = m.group()
-                    
+                chunks = regex.split(f"({regex.escape(self.special_token)})", chunk)
+                for c in chunks:
+                    if c == self.special_token:
+                        tokens.append(c.encode('utf-8'))
+                    else:
+                        for m in regex.finditer(PAT, c):
+                            tokens.append(m.group().encode('utf-8'))
+        return tokens
+
+        # Note: this is an early implementation using only one single thread, which is extremely slow in production environment. 
+        # CHANGE IT!
+
+    def encode_from_bytes(self, pretokens: list[list[bytes]]) -> list[list[int]]:
+        return [[self.encoder[b] for b in token] for token in pretokens]
+
+    def merge(self):
+        self.frequency_table: dict[tuple[int, int], list[tuple[int, int]]] = {}
+
+        for index in range(len(self.tokens)):
+            if self.tokens[index] == [self.encoder[self.special_token.encode('utf-8')]] or len(self.tokens[index]) == 1:
+                continue
+            else:
+                cache: list[int] = self.tokens[index]
+                for i in range(len(cache) - 1):
+                    pair = (cache[i], cache[i+1])
+                    if pair not in self.frequency_table:
+                        self.frequency_table[pair] = []
+                    self.frequency_table[pair].append((index, i))
+
+        # Note: this is an early completion of creating and maintaining a frequency table of pairs occured in the training tokens.
+        # Somehow should be improved to be FASTER.
+
+        most_freq_pair = max(
+            self.frequency_table.items(),
+            key=lambda x: (len(x[1]), x[0])
+        )
+
+        #Updating encoder and decoder
+        self.decoder[len(self.decoder)] = bytes([self.encoder[most_freq_pair[0][0]], self.encoder[most_freq_pair[0][1]]])
+        self.encoder[bytes([self.encoder[most_freq_pair[0][0]], self.encoder[most_freq_pair[0][1]]])] = len(self.decoder) - 1
+
+        for (index, pos) in reversed(most_freq_pair[1]):
+            tokens = self.tokens[index]
+            tokens[pos:pos+2] = [len(self.decoder) - 1]
+        
+        # End of this run
+
+        return most_freq_pair[0]
+
+        # Now the algorithm is so dumb that it will came across all the tokens and construct a new freq table every time.
+        # This is not efficient, should be revised later!
+        
 
 
-
-                
 
     def train(self, text):
-        raise NotImplementedError
+        pretoken = self.pretokenize()
+        self.tokens = self.encode_from_bytes(pretoken)
+        self.merge()
 
     def report(self):
 
@@ -42,9 +100,6 @@ class BPE:
 
         raise NotImplementedError
 
-    
-
-
 if __name__ == "__main__":
-    instance = BPE(10000, "data/TinyStoriesV2-GPT4-valid.txt", [], 4)
+    instance = BPE(10000, "tests/fixtures/tinystories_sample_5M.txt", '<|endoftext|>', 4)
     instance.pretokenize()
