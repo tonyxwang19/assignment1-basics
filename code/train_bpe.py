@@ -102,7 +102,7 @@ class BPE:
         self.tokens = self.encode_from_bytes(pretoken)
         for i in range(self.vocab_size - len(self.decoder)):
             self.merge()
-            print(f"Merge no. {i} complete")    
+            print(f"Merge no. {i} complete")  
         
         return self.encoder, self.decoder
 
