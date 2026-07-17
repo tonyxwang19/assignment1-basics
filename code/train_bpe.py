@@ -4,16 +4,17 @@ from cs336_basics.pretokenization_example import find_chunk_boundaries
 # Example Usage
 
 class BPE:
-    def __init__(self, vocab_size: int, input_path: str, special_tokens: str, num_processes: int = 4):
+    def __init__(self, vocab_size: int, input_path: str, special_tokens: list[str], num_processes: int = 4):
         self.vocab_size = vocab_size
-        self.special_token = special_tokens
+        self.special_tokens = special_tokens
         self.path = input_path
         self.num_processes = num_processes
         self.decoder: dict[int, bytes] = {}
 
         for i in range(256):
             self.decoder[len(self.decoder)] = bytes([i])
-        self.decoder[len(self.decoder)] = self.special_token.encode('utf-8')
+        for st in self.special_tokens:
+            self.decoder[len(self.decoder)] = st.encode('utf-8')
         self.encoder = {v: k for k, v in self.decoder.items()}
 
         self.tokens = []
@@ -23,15 +24,15 @@ class BPE:
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         
         with open(self.path, "rb") as f:
-            boundaries = find_chunk_boundaries(f, self.num_processes, self.special_token.encode('utf-8'))
+            boundaries = find_chunk_boundaries(f, self.num_processes, self.special_tokens[0].encode('utf-8'))
             tokens = []
 
             for start, end in zip(boundaries[:-1], boundaries[1:]):
                 f.seek(start)
                 chunk = f.read(end - start).decode("utf-8", errors="ignore")
-                chunks = regex.split(f"({regex.escape(self.special_token)})", chunk)
+                chunks = regex.split("|".join(self.special_tokens), chunk)
                 for c in chunks:
-                    if c == self.special_token:
+                    if c in self.special_tokens:
                         tokens.append(c.encode('utf-8'))
                     else:
                         for m in regex.finditer(PAT, c):
@@ -46,7 +47,7 @@ class BPE:
         for i in range(len(pretokens)):
             pretoken = pretokens[i]
             tokens.append([])
-            if pretoken == self.special_token.encode('utf-8'):
+            if pretoken.decode('utf-8') in self.special_tokens:
                 continue
             else:
                 for b in pretoken:
@@ -57,7 +58,11 @@ class BPE:
         self.frequency_table: dict[tuple[int, int], list[tuple[int, int]]] = {}
 
         for index in range(len(self.tokens)):
-            if self.tokens[index] == [self.encoder[self.special_token.encode('utf-8')]] or len(self.tokens[index]) == 1:
+            if (
+                len(self.tokens[index]) == 1
+                or b"".join(self.decoder[t] for t in self.tokens[index]).decode("utf-8")
+                in self.special_tokens
+            ):
                 continue
             else:
                 cache: list[int] = self.tokens[index]
@@ -97,6 +102,7 @@ class BPE:
         self.tokens = self.encode_from_bytes(pretoken)
         for i in range(self.vocab_size - len(self.decoder)):
             self.merge()
+            print(f"Merge no. {i} complete")    
         
         return self.encoder, self.decoder
 
@@ -109,7 +115,7 @@ class BPE:
 
 
 if __name__ == "__main__":
-    instance = BPE(1000, "tests/fixtures/tinystories_sample_5M.txt", '<|endoftext|>', 4)
+    instance = BPE(1000, "tests/fixtures/tinystories_sample_5M.txt", ['<|endoftext|>'], 4)
     instance.train()
     result = instance.report()
     print(result)
