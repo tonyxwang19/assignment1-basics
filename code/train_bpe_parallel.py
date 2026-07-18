@@ -19,8 +19,13 @@ class BPE:
 
         self.merges: list[tuple[bytes, bytes]] = []
 
-    def pretokenize(self):
-        raise NotImplementedError
+        # Initialize the frequency table.
+        self.frequency_table: dict[tuple[int, int], list[tuple[int, int]]] = {}
+
+    def pretokenize(self) -> list[int]:
+        with open(self.path, "rb") as f:
+            boundaries = find_chunk_boundaries(f, self.num_processes, self.special_tokens[0].encode('utf-8'))
+        return boundaries
         
     def cut_chunks(self, chunk: str) -> list[bytes]:
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -46,6 +51,36 @@ class BPE:
                 for b in pretoken:
                     tokens[i].append(self.encoder[bytes([b])])
         return tokens
+
+    def init_freq_table(self, tokens: list[list[int]]):
+        for index in range(len(tokens)):
+            if (
+                len(tokens[index]) == 1
+                or b"".join(self.decoder[t] for t in tokens[index]).decode("utf-8")
+                in self.special_tokens
+            ):
+                continue
+            else:
+                cache: list[int] = tokens[index]
+                for i in range(len(cache) - 1):
+                    pair = (cache[i], cache[i+1])
+                    if pair not in self.frequency_table:
+                        self.frequency_table[pair] = []
+                    self.frequency_table[pair].append((index, i))
+    
+    def find_max_pair(self) -> tuple[int, int]:
+        most_freq_pair = max(
+            self.frequency_table.items(),
+            key=lambda x: (len(x[1]), x[0])
+        )
+        return most_freq_pair
+
+    def update_vocab(self, most_freq_pair: tuple[int, int]):
+        #Updating encoder and decoder
+        self.decoder[len(self.decoder)] = self.decoder[most_freq_pair[0][0]] + self.decoder[most_freq_pair[0][1]]
+        self.encoder[self.decoder[most_freq_pair[0][0]] + self.decoder[most_freq_pair[0][1]]] = len(self.decoder) - 1
+
+    
 
     def train(self):
         raise NotImplementedError
