@@ -51,6 +51,16 @@ class BPE:
                 for b in pretoken:
                     tokens[i].append(self.encoder[bytes([b])])
         return tokens
+    
+    def update_tokens(self, most_freq_pair: tuple[int, int], tokens: list[list[int]], new_repr: int):
+        # Update the tokens after obtaining the most frequent pair
+        for token in tokens:
+            for j in range(len(token) - 1, 1, -1):
+                if token[j] == most_freq_pair[1] and token[j-1] == most_freq_pair[0]:
+                    token[j] = new_repr
+                    del token[j-1]
+                    j -= 1
+        return tokens
 
     def init_freq_table(self, tokens: list[list[int]]):
         for index in range(len(tokens)):
@@ -80,7 +90,40 @@ class BPE:
         self.decoder[len(self.decoder)] = self.decoder[most_freq_pair[0][0]] + self.decoder[most_freq_pair[0][1]]
         self.encoder[self.decoder[most_freq_pair[0][0]] + self.decoder[most_freq_pair[0][1]]] = len(self.decoder) - 1
 
-    
+        return None
+
+    def update_freq_table(self, most_freq_pair: tuple[int, int], tokens: list[list[int]], new_repr: int):
+        
+        # Lets say the most frequent pair is (a, b)，the goal is to:
+        # First delete the (a, b) in the freq_table
+        # Then find the frequency of (any, a, b) and (a, b, any), add to the freq_table
+
+        # Delete (a, b) in the freq_table
+        del self.frequency_table[most_freq_pair[0]]
+
+        # Find the frequency of (any, a, b) and (a, b, any), add to the freq_table
+        
+        # For (any, a, b):
+        for index in range(len(tokens)):
+            token = tokens[index]
+
+            for i in range(len(token)-1):
+                if token[i+1] == new_repr:
+                    pair = (token[i], token[i+1])
+                    self.frequency_table[pair] = []
+                    self.frequency_table[pair].append((index, i))
+        
+        # For (a, b, any):
+        for index in range(len(tokens)):
+            token = tokens[index]
+
+            for i in range(1, len(token)):
+                if token[i] == new_repr:
+                    pair = (token[i-1], token[i])
+                    self.frequency_table[pair] = []
+                    self.frequency_table[pair].append((index, i-1))
+
+        return None
 
     def train(self):
         raise NotImplementedError
