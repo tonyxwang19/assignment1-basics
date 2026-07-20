@@ -1,4 +1,4 @@
-import regex
+import regex  
 from cs336_basics.pretokenization_example import find_chunk_boundaries
 import multiprocessing
 
@@ -22,12 +22,21 @@ class BPE:
         # Initialize the frequency table.
         self.frequency_table: dict[tuple[int, int], list[tuple[int, int]]] = {}
 
-    def pretokenize(self) -> list[int]:
+    def find_chunks_bound(self) -> list[int]:
         with open(self.path, "rb") as f:
             boundaries = find_chunk_boundaries(f, self.num_processes, self.special_tokens[0].encode('utf-8'))
         return boundaries
+
+    def get_chunk(self, boundaries):
+        chunk: list[bytes] = []
+        chunks = regex.split("|".join(self.special_tokens), chunk)
+        return chunk
+
+        ## TODO Implement this function
+    
+
         
-    def cut_chunks(self, chunk: str) -> list[bytes]:
+    def pretokenize(self, chunk: str) -> list[bytes]:
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         tokens: list[bytes] = []
         chunks = regex.split("|".join(self.special_tokens), chunk)
@@ -63,6 +72,8 @@ class BPE:
         return tokens
 
     def init_freq_table(self, tokens: list[list[int]]):
+        # Initialize the frequency table by counting the frequency of each pair of tokens in each chunk
+
         for index in range(len(tokens)):
             if (
                 len(tokens[index]) == 1
@@ -79,16 +90,24 @@ class BPE:
                     self.frequency_table[pair].append((index, i))
     
     def find_max_pair(self) -> tuple[int, int]:
+        # Find the most frequent pair in the freq_table
+
         most_freq_pair = max(
             self.frequency_table.items(),
             key=lambda x: (len(x[1]), x[0])
         )
-        return most_freq_pair
+
+        ## TODO change to lexicographically order.
+
+        return most_freq_pair[0]
 
     def update_vocab(self, most_freq_pair: tuple[int, int]):
-        #Updating encoder and decoder
-        self.decoder[len(self.decoder)] = self.decoder[most_freq_pair[0][0]] + self.decoder[most_freq_pair[0][1]]
-        self.encoder[self.decoder[most_freq_pair[0][0]] + self.decoder[most_freq_pair[0][1]]] = len(self.decoder) - 1
+        # Updating encoder and decoder
+        self.decoder[len(self.decoder)] = self.decoder[most_freq_pair[0]] + self.decoder[most_freq_pair[1]]
+        self.encoder[self.decoder[most_freq_pair[0]] + self.decoder[most_freq_pair[1]]] = len(self.decoder) - 1
+
+        # Update merges
+        self.merges.append((self.decoder[most_freq_pair[0]], self.decoder[most_freq_pair[1]]))
 
         return None
 
@@ -97,9 +116,13 @@ class BPE:
         # Lets say the most frequent pair is (a, b)，the goal is to:
         # First delete the (a, b) in the freq_table
         # Then find the frequency of (any, a, b) and (a, b, any), add to the freq_table
+        # Finally delete the number of occurance for (any, a) if (any, a, b),
+        # and (b, any) if (a, b, any)
+
+        ## TODO delete overlapping occurance.
 
         # Delete (a, b) in the freq_table
-        del self.frequency_table[most_freq_pair[0]]
+        del self.frequency_table[most_freq_pair]
 
         # Find the frequency of (any, a, b) and (a, b, any), add to the freq_table
         
@@ -110,17 +133,19 @@ class BPE:
             for i in range(len(token)-1):
                 if token[i+1] == new_repr:
                     pair = (token[i], token[i+1])
-                    self.frequency_table[pair] = []
+                    if pair not in self.frequency_table:
+                        self.frequency_table[pair] = []
                     self.frequency_table[pair].append((index, i))
         
         # For (a, b, any):
         for index in range(len(tokens)):
             token = tokens[index]
 
-            for i in range(1, len(token)):
+            for i in range(len(token)-1):
                 if token[i] == new_repr:
                     pair = (token[i-1], token[i])
-                    self.frequency_table[pair] = []
+                    if pair not in self.frequency_table:
+                        self.frequency_table[pair] = []
                     self.frequency_table[pair].append((index, i-1))
 
         return None
