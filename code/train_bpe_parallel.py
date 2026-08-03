@@ -27,25 +27,20 @@ class BPE:
             boundaries = find_chunk_boundaries(f, self.num_processes, self.special_tokens[0].encode('utf-8'))
         return boundaries
 
-    def get_chunk(self, boundaries):
-        chunk: list[bytes] = []
-        chunks = regex.split("|".join(self.special_tokens), chunk)
-        return chunk
-
-        ## TODO Implement this function
-    
-
-        
-    def pretokenize(self, chunk: str) -> list[bytes]:
+    def pretokenize(self, boundaries: list[int], process_id: int) -> list[bytes]:
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         tokens: list[bytes] = []
-        chunks = regex.split("|".join(self.special_tokens), chunk)
-        for c in chunks:
-            if c in self.special_tokens:
-                tokens.append(c.encode('utf-8'))
-            else:
-                for m in regex.finditer(PAT, c):
-                    tokens.append(m.group().encode('utf-8'))
+        with open(self.path, "rb") as f:
+            start, end = boundaries[process_id], boundaries[process_id + 1]
+            f.seek(start)
+            chunk = f.read(end - start).decode("utf-8", errors="ignore")
+            chunks = regex.split("|".join(self.special_tokens), chunk)
+            for c in chunks:
+                if c in self.special_tokens:
+                    tokens.append(c.encode('utf-8'))
+                else:
+                    for m in regex.finditer(PAT, c):
+                        tokens.append(m.group().encode('utf-8'))
         return tokens
 
 
@@ -64,11 +59,11 @@ class BPE:
     def update_tokens(self, most_freq_pair: tuple[int, int], tokens: list[list[int]], new_repr: int):
         # Update the tokens after obtaining the most frequent pair
         for token in tokens:
-            for j in range(len(token) - 1, 1, -1):
-                if token[j] == most_freq_pair[1] and token[j-1] == most_freq_pair[0]:
+            for j in range(len(token)-2):
+                if token[j] == most_freq_pair[0] and token[j+1] == most_freq_pair[1]:
                     token[j] = new_repr
-                    del token[j-1]
-                    j -= 1
+                    del token[j+1]
+                    j += 1
         return tokens
 
     def init_freq_table(self, tokens: list[list[int]]):
@@ -94,10 +89,14 @@ class BPE:
 
         most_freq_pair = max(
             self.frequency_table.items(),
-            key=lambda x: (len(x[1]), x[0])
+            key=lambda item: (
+                len(item[1]),
+                (
+                    self.decoder[item[0][0]],
+                    self.decoder[item[0][1]],
+                ),
+            ),
         )
-
-        ## TODO change to lexicographically order.
 
         return most_freq_pair[0]
 
@@ -119,8 +118,6 @@ class BPE:
         # Finally delete the number of occurance for (any, a) if (any, a, b),
         # and (b, any) if (a, b, any)
 
-        ## TODO delete overlapping occurance.
-
         # Delete (a, b) in the freq_table
         del self.frequency_table[most_freq_pair]
 
@@ -136,6 +133,10 @@ class BPE:
                     if pair not in self.frequency_table:
                         self.frequency_table[pair] = []
                     self.frequency_table[pair].append((index, i))
+
+                    # Then delete the overlappings
+
+                    self.frequency_table[(token[i], most_freq_pair[0])].remove(tuple[int, int]([index, i]))
         
         # For (a, b, any):
         for index in range(len(tokens)):
@@ -143,10 +144,14 @@ class BPE:
 
             for i in range(len(token)-1):
                 if token[i] == new_repr:
-                    pair = (token[i-1], token[i])
+                    pair = (token[i], token[i+1])
                     if pair not in self.frequency_table:
                         self.frequency_table[pair] = []
                     self.frequency_table[pair].append((index, i-1))
+
+                    # Then delete the overlappings
+                    
+                    self.frequency_table[(most_freq_pair[1], token[i+1])].remove(tuple[int, int]([index, i-1]))
 
         return None
 
