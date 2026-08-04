@@ -1,5 +1,9 @@
+from typing import Any
+
+
 import regex  
 from cs336_basics.pretokenization_example import find_chunk_boundaries
+from collections import Counter
 import multiprocessing
 
 class BPE:
@@ -20,7 +24,7 @@ class BPE:
         self.merges: list[tuple[bytes, bytes]] = []
 
         # Initialize the frequency table.
-        self.word_list: dict[int, list[int]] = {} # word_id: token_list(word)
+        self.word_list: Counter = Counter[list[int]]()
         self.word_freq: dict[int, int] = {} # word_id: frequency
         self.pair_to_word: dict[tuple[int, int], list[int]] = {} # pair: word_id_list(word_id)
 
@@ -32,7 +36,7 @@ class BPE:
         return boundaries
 
     # Pretokenization function for each chunk given to each worker
-    def pretokenize(self, boundaries: list[int], process_id: int) -> list[bytes]:
+    def pretokenize(self, boundaries: list[int], process_id: int) -> list[list[int]]:
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         tokens: list[bytes] = []
         with open(self.path, "rb") as f:
@@ -62,47 +66,27 @@ class BPE:
                     tokens[i].append(self.encoder[bytes([b])])
         return tokens
     
-    def init_word_freq(self, tokens: list[list[int]]):
-        # Initialize the frequency table by counting the frequency of each pair of tokens in each chunk
-        for token in tokens:
-            if token in self.word_list:
-                self.word_freq[token] += 1
-            elif token not in self.special_tokens:
-                id = len(self.word_list)+1
-                self.word_freq[token] = 1
-                self.word_list[token] = id
+    def init_counter(self, tokens: list[list[int]]) -> Counter:
+        counter = Counter(tuple(t) for t in tokens)
+        return counter
 
-                for i in range(len(token)-1):
-                    pair = tuple(token[i], token[i+1])
-
-                    if pair not in self.pair_to_word:
-                        self.pair_to_word[pair] = []
-                    
-                    self.pair_to_word[pair].append(id)
-
-        return None
-
-    def parallel_worker(self, process_id):
-        tokens = self.pretokenize(self.find_chunks_bound(), process_id)
-        self.init_word_freq(tokens)
+    def parallel_worker(self, process_id: int, boundaries: list[int]) -> Counter:
+        tokens = self.pretokenize(boundaries, process_id)
+        counter = self.init_counter(tokens)
+        return counter
         
-    def train(self):
-        processes = []
+    def train(self) -> None:
 
-        for num in range(self.num_processes):
-            process = multiprocessing.Process(
-                target=self.parallel_worker,
-                args=(num,),
-            )
+        with multiprocessing.Pool(self.num_processes) as pool:
+            async_results = [pool.apply_async(self.parallel_worker, (i,self.find_chunks_bound())) for i in range(self.num_processes)]
 
-            process.start()
-            processes.append(process)
-
-        
-        for process in processes:
-            process.join()
+            for result in async_results:
+                self.word_list += result.get() 
             
         print('Phase 1: Pretokenization Complete')
+        print(self.word_list)
+
+        return None
 
 
 if __name__ == '__main__':
