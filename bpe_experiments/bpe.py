@@ -168,7 +168,7 @@ class BPE:
             if new_global_freq > 0:
                 self.pair_freq[pair] = new_global_freq
                 heapq.heappush(self.pair_freq_heap, self.make_heap_entry(pair, new_global_freq))
-                
+
             else:
                 self.pair_freq.pop(pair, None)
 
@@ -241,10 +241,7 @@ class BPE:
         print('Phase 2: Merge Complete')
         print(f"Merge Runtime: {end - start:.4f} seconds")
         
-        self.reports = {
-            "vocab": self.decoder,
-            "merges": self.merges,
-        }
+        self.reports = [self.decoder,self.merges]
 
     def report(self):
         if not self.reports:

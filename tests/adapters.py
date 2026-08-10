@@ -591,10 +591,10 @@ def run_train_bpe(
     """
 
 
-    import code.train_bpe as bpe
+    import bpe_experiments.bpe as bpe
 
     instance = bpe.BPE(vocab_size, input_path, special_tokens)
     instance.train()
-    vocab, merges = instance.report()
+    [vocab, merges] = instance.report()
 
-    return tuple[vocab, merges]
+    return vocab, merges
