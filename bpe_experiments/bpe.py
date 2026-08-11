@@ -201,8 +201,9 @@ class BPE:
         start = time.perf_counter()
 
         boundaries = self.find_chunks_bound()
-        with multiprocessing.Pool(self.num_processes) as pool:
-            async_results = [pool.apply_async(self.parallel_worker, (i,boundaries)) for i in range(self.num_processes)]
+        processes = min(self.num_processes, len(boundaries)-1)
+        with multiprocessing.Pool(processes=processes) as pool:
+            async_results = [pool.apply_async(self.parallel_worker, (i,boundaries)) for i in range(processes)]
             
             for result in async_results:
                 self.word_freq += result.get() 
