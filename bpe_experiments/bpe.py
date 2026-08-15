@@ -38,7 +38,7 @@ class BPE:
         self.merges: list[tuple[bytes, bytes]] = []
 
         # Initialize the frequency table.
-        self.word_freq: Counter[tuple[int, ...]] = Counter() # word: frequency
+        self.word_freq: Counter[bytes] = Counter() # word: frequency
         self.words: list[list[int]] = [] # Word List
         self.word_freqs: list[int] = [] # Word frequency list version
         self.pair_to_word: dict[tuple[int, int], dict[int, int]] = {} # pair: {word_id: frequency in this word}
@@ -54,9 +54,8 @@ class BPE:
         return boundaries
 
     # Pretokenization function for each chunk given to each worker
-    def pretokenize(self, boundaries: list[int], process_id: int) -> list[list[int]]:
+    def pretokenize(self, boundaries: list[int], process_id: int) -> Counter[bytes]:
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-        tokens: list[bytes] = []
         with open(self.path, "rb") as f:
             start, end = boundaries[process_id], boundaries[process_id + 1]
             f.seek(start)
@@ -64,39 +63,13 @@ class BPE:
             special_pattern = "|".join(
                 regex.escape(st) for st in self.special_tokens
             )
-            chunks = regex.split(special_pattern, chunk)
 
-            for c in chunks:
-                if c in self.special_tokens:
-                    tokens.append(c.encode('utf-8'))
-                else:
-                    for m in regex.finditer(PAT, c):
-                        tokens.append(m.group().encode('utf-8'))
+            counter = Counter()
 
-        return self.encode_from_bytes(tokens)
+            for c in regex.split(special_pattern, chunk):
+                for m in regex.finditer(PAT, c):
+                    counter[m.group().encode("utf-8")] += 1
 
-    # Util function to encode bytes to int representation.
-    def encode_from_bytes(self, pretokens: list[bytes]) -> list[list[int]]:
-        tokens: list[list[int]] = []
-        for i in range(len(pretokens)):
-            pretoken = pretokens[i]
-            tokens.append([])
-            if pretoken.decode('utf-8') in self.special_tokens:
-                continue
-            else:
-                for b in pretoken:
-                    tokens[i].append(self.encoder[bytes([b])])
-        return tokens
-
-    # Initiate Counter()
-    def init_counter(self, tokens: list[list[int]]) -> Counter:
-        counter = Counter(tuple(t) for t in tokens)
-        return counter
-
-    # Pretokenization worker function
-    def parallel_worker(self, process_id: int, boundaries: list[int]) -> Counter:
-        tokens = self.pretokenize(boundaries, process_id)
-        counter = self.init_counter(tokens)
         return counter
 
     # Heapify Func
@@ -147,20 +120,30 @@ class BPE:
             affected_pairs = old_freq.keys() | new_freq.keys()
 
             for pair in affected_pairs:
-                diff = new_freq.get(pair, 0) - old_freq.get(pair, 0)
+                old_count = old_freq.get(pair, 0)
+                new_count = new_freq.get(pair, 0)
+
+                diff = new_count - old_count
 
                 if diff != 0:
-                    delta[pair] = delta.get(pair, 0) + diff * weight
+                    delta[pair] = (delta.get(pair, 0) + diff * weight)
 
-                if new_freq[pair] > 0:
-                    self.pair_to_word.setdefault(pair, {})[id] = new_freq[pair]
+                if new_count > 0:
+                    self.pair_to_word.setdefault(
+                        pair, {}
+                    )[id] = new_count
+
                 else:
                     if pair in self.pair_to_word:
-                        self.pair_to_word[pair].pop(id, None)
+                        self.pair_to_word[pair].pop(
+                            id, None
+                        )
+
                         if not self.pair_to_word[pair]:
                             del self.pair_to_word[pair]
                         
             self.words[id] = new_word
+        
 
         for pair, diff in delta.items():
             new_global_freq = self.pair_freq.get(pair, 0) + diff
@@ -171,6 +154,8 @@ class BPE:
 
             else:
                 self.pair_freq.pop(pair, None)
+
+        return True
 
 
     def get_pair_counts(self, word: list[int]) -> Counter:
@@ -203,28 +188,40 @@ class BPE:
         boundaries = self.find_chunks_bound()
         processes = min(self.num_processes, len(boundaries)-1)
         with multiprocessing.Pool(processes=processes) as pool:
-            async_results = [pool.apply_async(self.parallel_worker, (i,boundaries)) for i in range(processes)]
+            async_results = [pool.apply_async(self.pretokenize, (boundaries,i)) for i in range(processes)]
             
             for result in async_results:
-                self.word_freq += result.get() 
+                self.word_freq.update(result.get())
 
         # Process Pair-Word Table
-        words = list[tuple[int, ...]](self.word_freq.keys())
-        for word_id, word in enumerate(words):
-            for c in range(len(word) - 1):
-                pair = (word[c],word[c+1])
-                if pair not in self.pair_to_word:
-                    self.pair_to_word[pair] = {}
-                self.pair_to_word[pair][word_id] = (
-                    self.pair_to_word[pair].get(word_id, 0) + 1
-                )
+        self.words = [
+            list(word)
+            for word in self.word_freq.keys()
+        ]
 
-        self.words = [list(word) for word in self.word_freq.keys()]
         self.word_freqs = list(self.word_freq.values())
         self.word_freq.clear() # Release word_freq
+
+
+        for word_id, word in enumerate(self.words):
+            weight = self.word_freqs[word_id]
+
+            pair_counts = Counter(
+                zip(word[:-1], word[1:])
+            )
+
+            for pair, count in pair_counts.items():
+
+                self.pair_to_word.setdefault(
+                    pair, {}
+                )[word_id] = count
+
+                self.pair_freq[pair] = (
+                    self.pair_freq.get(pair, 0)
+                    + count * weight
+                )
         
         # Process Pair Frequency Heap
-        self.pair_freq = {pair: sum(self.word_freqs[word_id] * self.pair_to_word[pair][word_id] for word_id in self.pair_to_word[pair]) for pair in self.pair_to_word}
         self.pair_freq_heap = [self.make_heap_entry(pair, freq) for pair, freq in self.pair_freq.items()]
         heapq.heapify(self.pair_freq_heap)
 
@@ -236,7 +233,8 @@ class BPE:
         start = time.perf_counter()
 
         for iteration in range(self.vocab_size - len(self.decoder)):
-            self.merge()
+            if not self.merge():
+                break
 
         end = time.perf_counter()
         print('Phase 2: Merge Complete')
@@ -256,6 +254,4 @@ if __name__ == '__main__':
 
     bpe = BPE(vocab_size=1000, input_path="tests/fixtures/tinystories_sample_5M.txt", special_tokens=['<|endoftext|>'], num_processes=8)
     bpe.train()
-    report = bpe.report()
-    # print(report)
-       
+    report = bpe.report()       
