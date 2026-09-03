@@ -15,7 +15,7 @@ class Linear(torch.nn.Module):
         std = math.sqrt(2/(self.in_features+self.out_features))
         empty_tensor = torch.empty(out_features, in_features, device = self.device, dtype = self.dtype)
         weight_initialized = torch.nn.init.trunc_normal_(tensor = empty_tensor,mean = 0, std = std, a = -3*std, b = 3*std)
-        self.weight = torch.nn.Parameter(data = weight_initialized)
+        self.weight = torch.nn.Parameter(data = weight_initialized, requires_grad = True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return einsum(self.weight, x, "d_out d_in, ... d_in -> ... d_out")
