@@ -1,5 +1,4 @@
 import torch
-import math
 
 class RMSNorm(torch.nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-5, device: torch.device = None, dtype: torch.dtype = None):
@@ -16,8 +15,11 @@ class RMSNorm(torch.nn.Module):
         in_dtype = x.dtype
         x = x.to(torch.float32)
 
-        rms = math.sqrt((1/self.d_model) @ x.sum + self.eps)
-        result = x @ self.gain / rms
+        rms = torch.sqrt(
+            x.pow(2).mean(dim=-1, keepdim=True) + self.eps
+        )
+
+        result = x * self.gain / rms
 
         return result.to(in_dtype)
 
