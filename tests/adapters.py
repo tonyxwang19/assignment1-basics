@@ -90,7 +90,13 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    from transformer.positionwise_feedforward import FFN
+
+    ffn = FFN(d_model=d_model, d_ff=d_ff)
+    ffn.load_state_dict({"w1": w1_weight, "w2": w2_weight, "w3": w3_weight})
+    result = ffn.forward(in_features)
+
+    return result
 
 
 def run_scaled_dot_product_attention(
